@@ -244,28 +244,90 @@ def _print_current_config():
 
 
 async def _configure_agents_interactively():
+    import os as _os
+
+    # ── Provider → Model catalogue ──────────────────────────────────────────
+    PROVIDER_MODELS = {
+        "openai":   ["gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1-nano", "gpt-4.1", "o4-mini"],
+        "gemini":   ["gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-pro"],
+        "deepseek": ["deepseek-chat", "deepseek-reasoner"],
+    }
+
+    # ── Detect which keys are present ───────────────────────────────────────
+    _key_env = {
+        "openai":   _os.getenv("OPENAI_API_KEY", ""),
+        "gemini":   _os.getenv("GEMINI_API_KEY", ""),
+        "deepseek": _os.getenv("DEEPSEEK_API_KEY", ""),
+    }
+    available_providers = [p for p, k in _key_env.items() if k and not k.startswith("sk-tu-api")]
+
+    if not available_providers:
+        print("\n  ✗ No hay API keys configuradas en .env")
+        print("  Agrega al menos una: OPENAI_API_KEY, GEMINI_API_KEY o DEEPSEEK_API_KEY\n")
+        return
+
     print("\n  ── Configurar agentes individualmente ──")
-    print("  (deja vacío para mantener el valor actual)\n")
+    print("  (presiona Enter para mantener el valor actual)\n")
+
     config = get_current_config()
+
     for name in get_all_agents():
         current = config.get(name, {})
         current_provider = current.get("provider", "openai")
         current_model = current.get("model", "gpt-4o-mini")
-        print(f"  Agente: {name}")
-        provider = input(f"    Proveedor (openai/gemini/deepseek) [{current_provider}]: ").strip()
-        model = input(f"    Modelo [{current_model}]: ").strip()
-        if provider:
-            current_provider = provider
-        if model:
-            current_model = model
-        set_agent_config(name, current_provider, current_model)
-        print(f"    → {current_provider}/{current_model}")
-        print()
-    print("  ✓ Configuración guardada.\n")
+        print(f"  ╔══ Agente: {name}  [{current_provider}/{current_model}]")
 
-    # Flush all observability events before exiting
-    flush_observability()
-    print("  Observability: eventos enviados." if observability_enabled() else "")
+        # ── Step 1: choose provider ─────────────────────────────────────────
+        print("  ║  Escoja el proveedor:")
+        for idx, prov in enumerate(available_providers, 1):
+            marker = " ◀ actual" if prov == current_provider else ""
+            print(f"  ║    {idx}. {prov}{marker}")
+        print(f"  ║    0. Mantener actual ({current_provider})")
+
+        try:
+            prov_choice = input("  ║  Proveedor > ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\n  Configuración cancelada.\n")
+            return
+
+        if prov_choice == "" or prov_choice == "0":
+            chosen_provider = current_provider
+        elif prov_choice.isdigit() and 1 <= int(prov_choice) <= len(available_providers):
+            chosen_provider = available_providers[int(prov_choice) - 1]
+        else:
+            print("  ║  ✗ Opción inválida, se mantiene el actual.")
+            chosen_provider = current_provider
+
+        # ── Step 2: choose model ────────────────────────────────────────────
+        models = PROVIDER_MODELS.get(chosen_provider, [])
+        if models:
+            print(f"  ║  Modelos disponibles para {chosen_provider}:")
+            for idx, mdl in enumerate(models, 1):
+                marker = " ◀ actual" if mdl == current_model and chosen_provider == current_provider else ""
+                print(f"  ║    {idx}. {mdl}{marker}")
+            print(f"  ║    0. Mantener actual ({current_model})")
+
+            try:
+                model_choice = input("  ║  Modelo > ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\n  Configuración cancelada.\n")
+                return
+
+            if model_choice == "" or model_choice == "0":
+                chosen_model = current_model if chosen_provider == current_provider else models[0]
+            elif model_choice.isdigit() and 1 <= int(model_choice) <= len(models):
+                chosen_model = models[int(model_choice) - 1]
+            else:
+                print("  ║  ✗ Opción inválida, se usa el primero de la lista.")
+                chosen_model = models[0]
+        else:
+            chosen_model = current_model
+
+        set_agent_config(name, chosen_provider, chosen_model)
+        print(f"  ╚══ ✓ {name} → {chosen_provider}/{chosen_model}\n")
+
+    print("  ✓ Configuración guardada.\n")
+    _print_current_config()
 
 
 if __name__ == "__main__":

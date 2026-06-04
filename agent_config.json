@@ -1,27 +1,27 @@
 {
   "product_creator": {
-    "provider": "deepseek",
-    "model": "deepseek-chat"
+    "provider": "gemini",
+    "model": "gemini-2.5-flash"
   },
   "product_reviewer": {
-    "provider": "deepseek",
-    "model": "deepseek-chat"
+    "provider": "gemini",
+    "model": "gemini-2.5-flash"
   },
   "requirements_creator": {
-    "provider": "deepseek",
-    "model": "deepseek-chat"
+    "provider": "gemini",
+    "model": "gemini-2.5-flash"
   },
   "requirements_reviewer": {
-    "provider": "openai",
-    "model": "gpt-4o-mini"
+    "provider": "gemini",
+    "model": "gemini-2.5-flash"
   },
   "design_creator": {
-    "provider": "deepseek",
-    "model": "deepseek-chat"
+    "provider": "gemini",
+    "model": "gemini-2.5-flash"
   },
   "design_reviewer": {
-    "provider": "openai",
-    "model": "gpt-4o-mini"
+    "provider": "gemini",
+    "model": "gemini-2.5-flash"
   },
   "clarifier": {
     "provider": "openai",
