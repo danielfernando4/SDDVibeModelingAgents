@@ -24,7 +24,7 @@ PHASE_LABELS = {
 FILE_EXTENSIONS = {
     "product": "md",
     "requirements": "md",
-    "design": "json",
+    "design": "py",
 }
 
 
@@ -74,7 +74,7 @@ def _parse_review_json(raw_response: str) -> dict:
     return {"verdict": "APPROVED", "quality_score": 7}
 
 
-def _strip_json_wrapper(text: str) -> str:
+def _strip_markdown_wrapper(text: str) -> str:
     text = text.strip()
     if text.startswith("```"):
         first_newline = text.find("\n")
@@ -102,12 +102,8 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
     is_redirection = state.get("is_redirection", False)
     phase_exists = state.get(f"{phase}_exists", False)
     max_iterations = ITERATIONS_MAP[phase]
-
-    # Observability context
-    session_id = state.get("session_id")
-    user_id = state.get("user_id")
-    trace_id = state.get("trace_id")
     parent_observation_id = state.get("parent_observation_id")
+    trace_id = state.get("trace_id")
 
     if is_redirection:
         mode_label = "REDIRECCIÓN"
@@ -254,8 +250,7 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
     # Save to disk
     file_extension = FILE_EXTENSIONS[phase]
     filepath = Path(state["spec_directory"]) / f"{phase}.{file_extension}"
-    if phase == "design":
-        current_draft = _strip_json_wrapper(current_draft)
+    current_draft = _strip_markdown_wrapper(current_draft)
     write_file(filepath, current_draft)
 
     state[f"{phase}_content"] = current_draft
@@ -267,7 +262,7 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
     redirection_summary = _extract_redirection_summary(last_review_data, phase)
     if redirection_summary:
         print(f"  │  redirección: \"{redirection_summary[:150]}{'...' if len(redirection_summary) > 150 else ''}\"")
-    await _handle_redirections(phase, state, redirection_summary, is_redirection)
+    await _handle_redirections(phase, state, redirection_summary, is_redirection, not phase_exists)
 
     # Status summary
     product_icon = "✓" if state.get("product_exists") else "✗"
@@ -287,23 +282,29 @@ async def _handle_redirections(
     state: AgentState,
     redirection_summary: str,
     is_redirection: bool,
+    is_first_creation: bool,
 ) -> None:
+    if is_first_creation:
+        print(f"  │  propagación: omitida (primera creación, sin versión anterior)")
+        return
+
     if is_redirection:
         if phase in ("product", "design"):
             print(f"  │  propagación: omitida (nodo ejecutado por redirección)")
             return
         if phase == "requirements":
             redirection_source = state.get("redirection_source")
+            reviewer_changes = redirection_summary if redirection_summary else f"Se modificaron requisitos."
             if redirection_source == "product" and state.get("design_exists"):
                 print(f"  │  propagación: redirección desde producto → diseño")
                 _add_to_redirection_queue(state, phase, "design",
-                    f"Se modificaron requisitos por cambios en producto.",
-                    f"Revisar el diseño según los nuevos requisitos.")
+                    reviewer_changes,
+                    f"Revisar el diseño según los nuevos requisitos: {reviewer_changes}")
             elif redirection_source == "design":
                 print(f"  │  propagación: redirección desde diseño → producto")
                 _add_to_redirection_queue(state, phase, "product",
-                    f"Se modificaron requisitos por cambios en diseño.",
-                    f"Revisar producto según los nuevos requisitos.")
+                    reviewer_changes,
+                    f"Revisar producto según los nuevos requisitos: {reviewer_changes}")
             else:
                 print(f"  │  propagación: sin fase destino para redirección")
         return
@@ -313,11 +314,12 @@ async def _handle_redirections(
         return
 
     existing_phases = _get_existing_phases(state, phase)
-    if not existing_phases:
-        print(f"  │  propagación: no hay otras fases existentes")
+    target_phases = _filter_propagation_targets(phase, existing_phases)
+    if not target_phases:
+        print(f"  │  propagación: sin fases destino según reglas de propagación")
         return
 
-    for target_phase in existing_phases:
+    for target_phase in target_phases:
         _add_to_redirection_queue(
             state, phase, target_phase,
             redirection_summary,
@@ -325,8 +327,18 @@ async def _handle_redirections(
         )
 
     pending = len(state.get("redirection_queue", []))
-    targets = ", ".join(sorted(existing_phases))
+    targets = ", ".join(sorted(target_phases))
     print(f"  │  propagación: {pending} redirección(es) → {targets}")
+
+
+def _filter_propagation_targets(phase: str, existing_phases: set) -> set:
+    if phase == "product":
+        return {"requirements"} & existing_phases
+    if phase == "design":
+        return {"requirements"} & existing_phases
+    if phase == "requirements":
+        return existing_phases  # product (si existe) + design (si existe)
+    return existing_phases
 
 
 def _extract_redirection_summary(review_data: dict, phase: str) -> str:

@@ -54,7 +54,7 @@ def spec_file_exists(filepath: Path) -> bool:
 def build_status_line(spec_name: str) -> str:
     product_ok = spec_file_exists(SPECS_DIRECTORY / spec_name / "product.md")
     requirements_ok = spec_file_exists(SPECS_DIRECTORY / spec_name / "requirements.md")
-    design_ok = spec_file_exists(SPECS_DIRECTORY / spec_name / "design.json")
+    design_ok = spec_file_exists(SPECS_DIRECTORY / spec_name / "design.py")
     p = "✓" if product_ok else "✗"
     r = "✓" if requirements_ok else "✗"
     d = "✓" if design_ok else "✗"
@@ -85,7 +85,7 @@ MENU_TEMPLATE = """
 def build_menu(spec_name: str) -> str:
     product_ok = spec_file_exists(SPECS_DIRECTORY / spec_name / "product.md")
     requirements_ok = spec_file_exists(SPECS_DIRECTORY / spec_name / "requirements.md")
-    design_ok = spec_file_exists(SPECS_DIRECTORY / spec_name / "design.json")
+    design_ok = spec_file_exists(SPECS_DIRECTORY / spec_name / "design.py")
 
     can_req = product_ok
     can_des = product_ok and requirements_ok
@@ -103,7 +103,7 @@ async def run_flow(prompt: str, target_phase: str, spec_name: str, session_id: s
     spec_directory = SPECS_DIRECTORY / spec_name
     product_path = spec_directory / "product.md"
     requirements_path = spec_directory / "requirements.md"
-    design_path = spec_directory / "design.json"
+    design_path = spec_directory / "design.py"
 
     user_id = LANGFUSE_USER_ID
 

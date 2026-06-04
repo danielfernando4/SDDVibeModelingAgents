@@ -17,6 +17,7 @@
 - ¿Métricas de Éxito son CUANTIFICABLES?
 - ¿NO hay detalles de implementación (tecnologías, frameworks, APIs)?
 - ¿Lenguaje declarativo, profesional, sin ambigüedades?
+- ¿No se repite lo que sí esta en el alcance en lo que no está en el alcance y viceversa?
 - ¿Todo en español?
 
 ## FORMATO DE RESPUESTA (JSON)
