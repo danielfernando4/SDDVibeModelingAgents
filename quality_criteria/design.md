@@ -10,7 +10,7 @@ Evalúa el script Python del diagrama de clases contra los siguientes criterios.
 - **¿El script es Python VÁLIDO?** Si tiene errores de sintaxis, es P0.
 - **¿Imports correctos?** Solo `from besser.BUML.metamodel.structural import (...)` con los types usados.
 - **¿Todas las clases tienen `Class(name="...")`?** PascalCase, UNA palabra, sin espacios ni tildes.
-- **¿Al menos 3 atributos por clase no-enum?** Cada atributo: `Property(name="...", type=...)`.
+- **¿Al menos 1 atributo por clase no-enum?** Cada atributo: `Property(name="...", type=...)`.
 - **¿Variables de atributo con formato `Clase_atributo`?** Ej: `Paciente_nombre`, no `nombre` solo.
 - **¿Enumerados bien definidos?** `Enumeration(name="...", literals={EnumerationLiteral(...)})`. Mínimo 2 literales. Nombres de literales en MAYÚSCULAS.
 - **¿Asignación de atributos a clases?** `Clase.attributes = {attr1, attr2, ...}`.

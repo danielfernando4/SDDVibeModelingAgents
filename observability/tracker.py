@@ -1,5 +1,5 @@
-"""
-Langfuse observability tracker — singleton client and trace management.
+﻿"""
+Langfuse observability tracker â€” singleton client and trace management.
 
 Langfuse v4 (OTEL-based) removed the legacy v2 API (client.trace(), etc.).
 In v4 the correct imperative API is:
@@ -14,15 +14,15 @@ langfuse_user_id kwargs directly on each OpenAI .create() call (handled
 by the langfuse.openai wrapper). The root span groups all child generations.
 
 This module provides:
-  - get_langfuse_client()  → singleton with auth check
-  - is_enabled()           → bool
-  - create_trace()         → _TraceHandle (safe .update()/.end() wrapper)
-  - flush() / shutdown()   → lifecycle
+  - get_langfuse_client()  â†’ singleton with auth check
+  - is_enabled()           â†’ bool
+  - create_trace()         â†’ _TraceHandle (safe .update()/.end() wrapper)
+  - flush() / shutdown()   â†’ lifecycle
 """
 
 from __future__ import annotations
 
-import contextlib
+
 
 from config import (
     LANGFUSE_SECRET_KEY,
@@ -35,7 +35,7 @@ _client = None
 _initialized = False
 
 
-# ── Lightweight handle returned by create_trace() ────────────────────────────
+# â”€â”€ Lightweight handle returned by create_trace() â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 class _TraceHandle:
     """
@@ -75,7 +75,7 @@ class _TraceHandle:
             pass
 
 
-# ── Client management ─────────────────────────────────────────────────────────
+# â”€â”€ Client management â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def _has_credentials() -> bool:
     """Check if Langfuse credentials are set in environment variables."""
@@ -130,26 +130,40 @@ def get_langfuse_client():
     return _client
 
 
-# ── Context manager for trace attribute propagation ──────────────────────────
+# â”€â”€ Context manager for trace attribute propagation â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
-@contextlib.contextmanager
+class _ObservabilityContext:
+    """Class-based context manager to avoid generator throw() issues with @contextmanager."""
+
+    def __init__(self, session_id: str | None = None, user_id: str | None = None):
+        self._session_id = session_id
+        self._user_id = user_id
+        self._cm = None
+
+    def __enter__(self):
+        if is_enabled():
+            try:
+                from langfuse import propagate_attributes
+                self._cm = propagate_attributes(session_id=self._session_id, user_id=self._user_id)
+                self._cm.__enter__()
+            except Exception:
+                self._cm = None
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if self._cm is not None:
+            try:
+                self._cm.__exit__(exc_type, exc_val, exc_tb)
+            except Exception:
+                pass
+        return False
+
+
 def observability_context(session_id: str | None = None, user_id: str | None = None):
-    """
-    Context manager to propagate session_id and user_id to all nested observations.
-    Bypasses gracefully if Langfuse is disabled or connection failed.
-    """
-    if is_enabled():
-        try:
-            from langfuse import propagate_attributes
-            with propagate_attributes(session_id=session_id, user_id=user_id):
-                yield
-        except Exception:
-            yield
-    else:
-        yield
+    return _ObservabilityContext(session_id=session_id, user_id=user_id)
 
 
-# ── Trace creation (v4 imperative API) ───────────────────────────────────────
+# â”€â”€ Trace creation (v4 imperative API) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def create_trace(
     name: str,
@@ -162,14 +176,14 @@ def create_trace(
     """
     Create a root span for a flow execution using the Langfuse v4 API.
 
-    Uses client.start_observation(as_type="span") — the v4 imperative call
+    Uses client.start_observation(as_type="span") â€” the v4 imperative call
     that returns a LangfuseSpan with .update() and .end() methods.
 
     session_id and user_id are embedded in metadata because the v4 span API
     does not expose them as top-level parameters (they are propagated via
     OTEL context or via langfuse_* kwargs on individual OpenAI .create() calls).
 
-    Returns a _TraceHandle that is always safe to call — it degrades to a
+    Returns a _TraceHandle that is always safe to call â€” it degrades to a
     no-op when Langfuse is unavailable.
     """
     client = get_langfuse_client()
@@ -202,7 +216,7 @@ def create_trace(
         return _TraceHandle(None)
 
 
-# ── Lifecycle ─────────────────────────────────────────────────────────────────
+# â”€â”€ Lifecycle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
 def flush() -> None:
     """Flush all pending Langfuse events. Call before exiting."""
@@ -223,3 +237,30 @@ def shutdown() -> None:
             pass
     _client = None
     _initialized = False
+# --- Agent observation (v4 imperative API) ---
+
+class _ObservedCall:
+    """Wraps an LLM call with Langfuse observation (generation span)."""
+
+    def __init__(self, name: str, provider: str, model: str, input_data=None):
+        self._handle = None
+        if is_enabled():
+            try:
+                client = get_langfuse_client()
+                self._handle = client.start_observation(
+                    name=name, as_type="generation", model=model,
+                    input=input_data, metadata={"provider": provider},
+                )
+            except Exception:
+                self._handle = None
+
+    def end(self, output=None, usage=None):
+        if self._handle is not None:
+            try:
+                kwargs = {}
+                if output: kwargs["output"] = str(output)[:2000]
+                if usage: kwargs["usage"] = usage
+                if kwargs: self._handle.update(**kwargs)
+                self._handle.end()
+            except Exception:
+                pass

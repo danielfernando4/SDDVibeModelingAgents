@@ -24,6 +24,7 @@ if hasattr(sys.stderr, "reconfigure"):
         pass
 
 from config import SPECS_DIRECTORY, DEFAULT_SPEC_NAME, LANGFUSE_USER_ID, AGENT_NAMES
+from agent_config import load_defaults, get_all_agents, get_current_config, set_agent_config
 from graph_builder import build_graph
 from state import AgentState
 from utils.llm_client import call_llm
@@ -79,7 +80,11 @@ MENU_TEMPLATE = """
   │  3. Diseño        [{design_marker}] diagrama de clases         │
   │                                              │
   │  0. Salir                                    │
-  └──────────────────────────────────────────────┘"""
+  └──────────────────────────────────────────────┘
+
+  ── Configuración de agentes ──
+  5. Cargar configuración por defecto
+  6. Configurar agentes individualmente"""
 
 
 def build_menu(spec_name: str) -> str:
@@ -175,6 +180,16 @@ async def interactive_loop():
             print("  ¡Hasta luego!\n")
             break
 
+        if choice == "5":
+            load_defaults()
+            print("\n  ✓ Configuración por defecto cargada:")
+            _print_current_config()
+            continue
+
+        if choice == "6":
+            await _configure_agents_interactively()
+            continue
+
         if choice not in ("1", "2", "3"):
             print("  Opción no válida. Elige 1, 2, 3 o 0.\n")
             continue
@@ -218,6 +233,35 @@ async def interactive_loop():
             print()
 
         print(f"\n  [{build_status_line(spec_name)}]  Listo.\n")
+
+
+def _print_current_config():
+    config = get_current_config()
+    for name in get_all_agents():
+        cfg = config.get(name, {})
+        print(f"    {name}: {cfg.get('provider', '?')}/{cfg.get('model', '?')}")
+    print()
+
+
+async def _configure_agents_interactively():
+    print("\n  ── Configurar agentes individualmente ──")
+    print("  (deja vacío para mantener el valor actual)\n")
+    config = get_current_config()
+    for name in get_all_agents():
+        current = config.get(name, {})
+        current_provider = current.get("provider", "openai")
+        current_model = current.get("model", "gpt-4o-mini")
+        print(f"  Agente: {name}")
+        provider = input(f"    Proveedor (openai/gemini/deepseek) [{current_provider}]: ").strip()
+        model = input(f"    Modelo [{current_model}]: ").strip()
+        if provider:
+            current_provider = provider
+        if model:
+            current_model = model
+        set_agent_config(name, current_provider, current_model)
+        print(f"    → {current_provider}/{current_model}")
+        print()
+    print("  ✓ Configuración guardada.\n")
 
     # Flush all observability events before exiting
     flush_observability()

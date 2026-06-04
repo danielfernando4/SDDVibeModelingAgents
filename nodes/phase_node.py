@@ -3,11 +3,13 @@ import re
 from pathlib import Path
 
 from state import AgentState, RedirectionItem
-from config import MAX_ITERATIONS_PRODUCT, MAX_ITERATIONS_REQUIREMENTS, MAX_ITERATIONS_DESIGN, AGENT_NAMES
+from config import MAX_ITERATIONS_PRODUCT, MAX_ITERATIONS_REQUIREMENTS, MAX_ITERATIONS_DESIGN
 from agents.prompt_builder import build_creator_system_prompt, build_reviewer_system_prompt, build_creator_user_message
 from agents.creator import run_creator
 from utils.file_manager import write_file
-from utils.llm_client import call_llm_with_history
+from utils.llm_client import call_llm_with_history, call_llm_with_history_and_usage
+from observability.tracker import _ObservedCall
+from agent_config import get_agent_config
 
 ITERATIONS_MAP = {
     "product": MAX_ITERATIONS_PRODUCT,
@@ -32,9 +34,6 @@ async def _clarify_user_prompt(
     raw_prompt: str,
     phase: str,
     creator_system_prompt: str,
-    trace_id: str | None = None,
-    parent_observation_id: str | None = None,
-    trace_name: str | None = None,
 ) -> str:
     clarification_prompt = (
         f"Analiza el siguiente prompt del usuario para la fase '{phase}' y detecta "
@@ -45,16 +44,17 @@ async def _clarify_user_prompt(
         f"ambigüedades con interpretaciones razonables. No cambies la intención.\n\n"
         f"Responde SOLO con el prompt clarificado o SIN_CAMBIOS."
     )
-    result = await call_llm_with_history(
-        [
-            {"role": "system", "content": creator_system_prompt},
-            {"role": "user", "content": clarification_prompt},
-        ],
-        trace_id=trace_id,
-        parent_observation_id=parent_observation_id,
-        trace_name=trace_name or f"{phase}-clarify",
+    config = get_agent_config("clarifier")
+    observation = _ObservedCall(
+        name=f"{phase}-clarify", provider=config["provider"], model=config["model"],
+        input_data=clarification_prompt[:500],
     )
-    result = result.strip()
+    result_text, usage = await call_llm_with_history_and_usage(
+        [{"role": "system", "content": creator_system_prompt}, {"role": "user", "content": clarification_prompt}],
+        config["provider"], config["model"],
+    )
+    observation.end(output=result_text, usage=usage)
+    result = result_text.strip()
     if result == "SIN_CAMBIOS":
         return raw_prompt
     return result
@@ -102,8 +102,6 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
     is_redirection = state.get("is_redirection", False)
     phase_exists = state.get(f"{phase}_exists", False)
     max_iterations = ITERATIONS_MAP[phase]
-    parent_observation_id = state.get("parent_observation_id")
-    trace_id = state.get("trace_id")
 
     if is_redirection:
         mode_label = "REDIRECCIÓN"
@@ -127,8 +125,6 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
         creator_placeholder = build_creator_system_prompt(phase, creator_mode, state)
         clarified = await _clarify_user_prompt(
             user_prompt_raw, phase, creator_placeholder,
-            trace_id=trace_id, parent_observation_id=parent_observation_id,
-            trace_name=AGENT_NAMES.get(f"{phase}_clarify", f"{phase}-clarify"),
         )
         if clarified != user_prompt_raw:
             print(f"  │  prompt: \"{clarified[:120]}{'...' if len(clarified) > 120 else ''}\"")
@@ -143,7 +139,10 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
     creator_message = build_creator_user_message(phase, creator_mode, state)
 
     reviewer_mode = "modify" if mode_label in ("MODIFICACIÓN", "REDIRECCIÓN") else "create"
-    print(f"  │  creator: creator_{creator_mode}.md  |  reviewer: reviewer_{reviewer_mode}.md")
+    creator_cfg = get_agent_config(f"{phase}_creator")
+    reviewer_cfg = get_agent_config(f"{phase}_reviewer")
+    print(f"  │  creator: {creator_cfg['provider']}/{creator_cfg['model']} | creator_{creator_mode}.md")
+    print(f"  │  reviewer: {reviewer_cfg['provider']}/{reviewer_cfg['model']} | reviewer_{reviewer_mode}.md")
 
     current_draft = ""
     reviewer_feedback_text = ""
@@ -152,11 +151,14 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
     last_review_data = {}
 
     for iteration_number in range(1, max_iterations + 1):
+        creator_obs = _ObservedCall(
+            name=f"{phase}-creator-{iteration_number}",
+            provider=creator_cfg["provider"], model=creator_cfg["model"],
+            input_data=creator_message[:500],
+        )
         if iteration_number == 1:
-            draft = await run_creator(
-                phase, creator_system, creator_message,
-                trace_id=trace_id, parent_observation_id=parent_observation_id,
-                trace_name=f"{AGENT_NAMES.get(f'{phase}_creator', f'{phase}-creator')}-iter{iteration_number}",
+            draft, usage = await run_creator(
+                f"{phase}_creator", creator_system, creator_message,
             )
         else:
             refinement_message = (
@@ -165,17 +167,22 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
                 f"=== FIN TAREAS ===\n"
                 f"Genera el documento COMPLETO. Conserva lo que no necesita cambios."
             )
-            draft = await run_creator(
-                phase, creator_system, creator_message,
+            draft, usage = await run_creator(
+                f"{phase}_creator", creator_system, creator_message,
                 previous_draft=current_draft, reviewer_feedback=refinement_message,
-                trace_id=trace_id, parent_observation_id=parent_observation_id,
-                trace_name=f"{AGENT_NAMES.get(f'{phase}_creator', f'{phase}-creator')}-iter{iteration_number}",
             )
+        creator_obs.end(output=draft[:500], usage=usage)
 
         current_draft = draft
 
         reviewer_system = build_reviewer_system_prompt(phase, reviewer_mode, state, draft)
-        review_result = await call_llm_with_history(
+        reviewer_config = get_agent_config(f"{phase}_reviewer")
+        reviewer_obs = _ObservedCall(
+            name=f"{phase}-reviewer-{iteration_number}",
+            provider=reviewer_config["provider"], model=reviewer_config["model"],
+            input_data=draft[:500],
+        )
+        review_result, review_usage = await call_llm_with_history_and_usage(
             [
                 {"role": "system", "content": reviewer_system},
                 {"role": "user", "content": (
@@ -183,10 +190,9 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
                     f"Responde ÚNICAMENTE con el JSON de veredicto."
                 )},
             ],
-            trace_id=trace_id,
-            parent_observation_id=parent_observation_id,
-            trace_name=f"{AGENT_NAMES.get(f'{phase}_reviewer', f'{phase}-reviewer')}-iter{iteration_number}",
+            reviewer_config["provider"], reviewer_config["model"],
         )
+        reviewer_obs.end(output=review_result[:500], usage=review_usage)
         review_data = _parse_review_json(review_result)
         last_review_data = review_data
         final_verdict = review_data.get("verdict", "NEEDS_REVISION")

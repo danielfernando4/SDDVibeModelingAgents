@@ -1,0 +1,30 @@
+{
+  "product_creator": {
+    "provider": "deepseek",
+    "model": "deepseek-chat"
+  },
+  "product_reviewer": {
+    "provider": "deepseek",
+    "model": "deepseek-chat"
+  },
+  "requirements_creator": {
+    "provider": "deepseek",
+    "model": "deepseek-chat"
+  },
+  "requirements_reviewer": {
+    "provider": "openai",
+    "model": "gpt-4o-mini"
+  },
+  "design_creator": {
+    "provider": "deepseek",
+    "model": "deepseek-chat"
+  },
+  "design_reviewer": {
+    "provider": "openai",
+    "model": "gpt-4o-mini"
+  },
+  "clarifier": {
+    "provider": "openai",
+    "model": "gpt-4o-mini"
+  }
+}

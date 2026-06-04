@@ -1,18 +1,12 @@
 import json
 import re
-from utils.llm_client import call_llm_with_history
+from utils.llm_client import call_llm_with_history_and_usage
+from agent_config import get_agent_config
 
 
-async def run_creator(
-    phase: str,
-    system_prompt: str,
-    user_message: str,
-    previous_draft: str = "",
-    reviewer_feedback: str = "",
-    trace_id: str | None = None,
-    parent_observation_id: str | None = None,
-    trace_name: str | None = None,
-) -> str:
+async def run_creator(agent_name: str, system_prompt: str, user_message: str, previous_draft: str = "", reviewer_feedback: str = "", **kwargs) -> tuple[str, dict]:
+    config = get_agent_config(agent_name)
+
     messages = [{"role": "system", "content": system_prompt}]
 
     if previous_draft and reviewer_feedback:
@@ -21,27 +15,14 @@ async def run_creator(
     else:
         messages.append({"role": "user", "content": user_message})
 
-    return await call_llm_with_history(
-        messages,
-        trace_id=trace_id,
-        parent_observation_id=parent_observation_id,
-        trace_name=trace_name or f"{phase}-creator",
-    )
+    text, usage = await call_llm_with_history_and_usage(messages, config["provider"], config["model"])
+    return text, usage
 
 
-async def run_reviewer(
-    phase: str,
-    system_prompt: str,
-    draft: str,
-    iteration: int,
-    max_iterations: int,
-    trace_id: str | None = None,
-    parent_observation_id: str | None = None,
-    trace_name: str | None = None,
-) -> dict:
+async def run_reviewer(agent_name: str, system_prompt: str, draft: str, iteration: int, max_iterations: int, phase: str) -> dict:
+    config = get_agent_config(agent_name)
+
     user_message = (
-        f"=== PROMPT ORIGINAL DEL USUARIO ===\n"
-        f"(verifica que el draft trate EXACTAMENTE sobre esto)\n\n"
         f"Revisa este draft de {phase} (iteración {iteration}/{max_iterations}). "
         f"Responde ÚNICAMENTE con el JSON de veredicto."
     )
@@ -51,9 +32,7 @@ async def run_reviewer(
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_message},
         ],
-        trace_id=trace_id,
-        parent_observation_id=parent_observation_id,
-        trace_name=trace_name or f"{phase}-reviewer",
+        config["provider"], config["model"],
     )
 
     return _parse_review_json(response)
