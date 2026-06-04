@@ -28,3 +28,9 @@ class AgentState(TypedDict):
     target_phase: str
     spec_name: str
     spec_directory: str
+
+    # Observability
+    session_id: str
+    user_id: str
+    trace_id: str
+    parent_observation_id: str

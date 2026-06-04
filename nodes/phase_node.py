@@ -3,7 +3,7 @@ import re
 from pathlib import Path
 
 from state import AgentState, RedirectionItem
-from config import MAX_ITERATIONS_PRODUCT, MAX_ITERATIONS_REQUIREMENTS, MAX_ITERATIONS_DESIGN
+from config import MAX_ITERATIONS_PRODUCT, MAX_ITERATIONS_REQUIREMENTS, MAX_ITERATIONS_DESIGN, AGENT_NAMES
 from agents.prompt_builder import build_creator_system_prompt, build_reviewer_system_prompt, build_creator_user_message
 from agents.creator import run_creator
 from utils.file_manager import write_file
@@ -28,7 +28,14 @@ FILE_EXTENSIONS = {
 }
 
 
-async def _clarify_user_prompt(raw_prompt: str, phase: str, creator_system_prompt: str) -> str:
+async def _clarify_user_prompt(
+    raw_prompt: str,
+    phase: str,
+    creator_system_prompt: str,
+    trace_id: str | None = None,
+    parent_observation_id: str | None = None,
+    trace_name: str | None = None,
+) -> str:
     clarification_prompt = (
         f"Analiza el siguiente prompt del usuario para la fase '{phase}' y detecta "
         f"ambigüedades o falta de claridad.\n\n"
@@ -42,7 +49,10 @@ async def _clarify_user_prompt(raw_prompt: str, phase: str, creator_system_promp
         [
             {"role": "system", "content": creator_system_prompt},
             {"role": "user", "content": clarification_prompt},
-        ]
+        ],
+        trace_id=trace_id,
+        parent_observation_id=parent_observation_id,
+        trace_name=trace_name or f"{phase}-clarify",
     )
     result = result.strip()
     if result == "SIN_CAMBIOS":
@@ -93,6 +103,12 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
     phase_exists = state.get(f"{phase}_exists", False)
     max_iterations = ITERATIONS_MAP[phase]
 
+    # Observability context
+    session_id = state.get("session_id")
+    user_id = state.get("user_id")
+    trace_id = state.get("trace_id")
+    parent_observation_id = state.get("parent_observation_id")
+
     if is_redirection:
         mode_label = "REDIRECCIÓN"
         creator_mode = "modify_redirection"
@@ -113,7 +129,11 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
     user_prompt_raw = state.get("user_prompt", "")
     if not is_redirection:
         creator_placeholder = build_creator_system_prompt(phase, creator_mode, state)
-        clarified = await _clarify_user_prompt(user_prompt_raw, phase, creator_placeholder)
+        clarified = await _clarify_user_prompt(
+            user_prompt_raw, phase, creator_placeholder,
+            trace_id=trace_id, parent_observation_id=parent_observation_id,
+            trace_name=AGENT_NAMES.get(f"{phase}_clarify", f"{phase}-clarify"),
+        )
         if clarified != user_prompt_raw:
             print(f"  │  prompt: \"{clarified[:120]}{'...' if len(clarified) > 120 else ''}\"")
         else:
@@ -137,7 +157,11 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
 
     for iteration_number in range(1, max_iterations + 1):
         if iteration_number == 1:
-            draft = await run_creator(phase, creator_system, creator_message)
+            draft = await run_creator(
+                phase, creator_system, creator_message,
+                trace_id=trace_id, parent_observation_id=parent_observation_id,
+                trace_name=f"{AGENT_NAMES.get(f'{phase}_creator', f'{phase}-creator')}-iter{iteration_number}",
+            )
         else:
             refinement_message = (
                 f"=== TAREAS PENDIENTES ===\n"
@@ -147,7 +171,9 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
             )
             draft = await run_creator(
                 phase, creator_system, creator_message,
-                previous_draft=current_draft, reviewer_feedback=refinement_message
+                previous_draft=current_draft, reviewer_feedback=refinement_message,
+                trace_id=trace_id, parent_observation_id=parent_observation_id,
+                trace_name=f"{AGENT_NAMES.get(f'{phase}_creator', f'{phase}-creator')}-iter{iteration_number}",
             )
 
         current_draft = draft
@@ -160,7 +186,10 @@ async def run_phase_node(phase: str, state: AgentState) -> AgentState:
                     f"Revisa este draft de {phase} (iteración {iteration_number}/{max_iterations}). "
                     f"Responde ÚNICAMENTE con el JSON de veredicto."
                 )},
-            ]
+            ],
+            trace_id=trace_id,
+            parent_observation_id=parent_observation_id,
+            trace_name=f"{AGENT_NAMES.get(f'{phase}_reviewer', f'{phase}-reviewer')}-iter{iteration_number}",
         )
         review_data = _parse_review_json(review_result)
         last_review_data = review_data
